@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from typing import Generator, Tuple
 
 import snowflake.connector as sc
-from snowflake.connector import ProgrammingError
 from snowflake.connector.converter_null import SnowflakeNoConverterToPython
 
 
@@ -29,6 +28,14 @@ def snowflake_cursor() -> (
     cur = conn.cursor()
     try:
         yield conn, cur
+    except sc.errors.ProgrammingError as e:
+        # https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-example#handling-errors
+        # default error message
+        print(e)
+        # customer error message
+        print("Error {0} ({1}): {2} ({3})".format(e.errno, e.sqlstate, e.msg, e.sfqid))
+        conn.rollback()
+        raise e
     finally:
         cur.close()
         conn.close()
@@ -63,6 +70,9 @@ with snowflake_cursor() as (conn, cur):
 
 with snowflake_cursor() as (conn, cur):
     print("\n====== return as a list of dict")
+    # ! cur.describe can get the column names without executing the query
+    result_metadata_list = cur.describe("SELECT CURRENT_ROLE()")
+    print(",".join([col.name for col in result_metadata_list]))
     cur.execute("SELECT CURRENT_ROLE()")
     result_meta = cur.description
     results = [dict(zip([col.name for col in result_meta], row)) for row in cur]
@@ -108,7 +118,7 @@ with snowflake_cursor() as (conn, cur):
     # try:
     #     while conn.is_still_running(conn.get_query_status_throw_if_error(query_id)):
     #         time.sleep(1)
-    # except ProgrammingError as err:
+    # except sc.errors.ProgrammingError as err:
     #     print("Programming Error: {0}".format(err))
     # ! conn.get_results_from_sfqid has internal wait mechanism, but not for conn.query_result()
     cur.get_results_from_sfqid(query_id)
